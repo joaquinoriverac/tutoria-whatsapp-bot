@@ -75,7 +75,7 @@ async function callGroq(historial, nuevoMensaje) {
 app.post('/webhook', async (req, res) => {
   const mensaje = req.body.Body?.trim();
   const de = req.body.From;
-  if (!mensaje || !de) return res.sendStatus(400);
+  if (!mensaje || !de) return res.status(400).end();
   if (!conversaciones[de]) conversaciones[de] = [];
   try {
     const textoRespuesta = await callGroq(conversaciones[de], mensaje);
@@ -89,7 +89,7 @@ app.post('/webhook', async (req, res) => {
       to: de,
       body: textoRespuesta,
     });
-    res.sendStatus(200);
+    res.status(200).end();
   } catch (error) {
     console.error('Error:', error.message || error);
     try {
@@ -101,7 +101,7 @@ app.post('/webhook', async (req, res) => {
     } catch (err) {
       console.error('Error enviando mensaje de error:', err.message);
     }
-    res.sendStatus(500);
+    res.status(500).end();
   }
 });
 
