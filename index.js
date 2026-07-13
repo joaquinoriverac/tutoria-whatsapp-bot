@@ -1,13 +1,11 @@
 require('dotenv').config();
 const express = require('express');
 const twilio = require('twilio');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const app = express();
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 
 const conversaciones = {};
@@ -25,7 +23,7 @@ Eres el asistente de SOPORTE Y BIENVENIDA — no el tutor académico. Tu trabajo
 3. Orientar a profesores que quieren implementarla.
 4. Orientar a alumnos que quieren acceder a su clase.
 5. Agendar demos para directores/coordinadores (enviarlos a tutoriaperu.com).
-6. Si alguien tiene una pregunta ACADÉMICA (tarea, ejercicio, etc.), dirígelos a usar la plataforma en tutoriaperu.com — ahí está el tutor IA real. No respondas preguntas académicas tú mismo.
+6. Si alguien tiene una pregunta ACADÉMICA, dirígelos a usar la plataforma en tutoriaperu.com — ahí está el tutor IA real. No respondas preguntas académicas tú mismo.
 
 PROBLEMAS TÉCNICOS COMUNES:
 - Página no carga: recargar, probar otro navegador, verificar conexión.
@@ -42,6 +40,34 @@ REGLAS:
 - Nunca inventes información.
 - Para registrarse o ver planes: tutoriaperu.com.`;
 
+async function callGemini(historial, nuevoMensaje) {
+  const contents = [
+    ...historial,
+    { role: 'user', parts: [{ text: nuevoMensaje }] }
+  ];
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents,
+        systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+        generationConfig: { maxOutputTokens: 500 }
+      })
+    }
+  );
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Gemini ${response.status}: ${errText}`);
+  }
+
+  const data = await response.json();
+  return data.candidates[0].content.parts[0].text;
+}
+
 app.post('/webhook', async (req, res) => {
   const mensaje = req.body.Body?.trim();
   const de = req.body.From;
@@ -51,18 +77,7 @@ app.post('/webhook', async (req, res) => {
   if (!conversaciones[de]) conversaciones[de] = [];
 
   try {
-    const model = genAI.getGenerativeModel({
-      model: 'gemini-2.0-flash',
-      systemInstruction: SYSTEM_PROMPT,
-    });
-
-    const chat = model.startChat({
-      history: conversaciones[de],
-      generationConfig: { maxOutputTokens: 500 },
-    });
-
-    const result = await chat.sendMessage(mensaje);
-    const textoRespuesta = result.response.text();
+    const textoRespuesta = await callGemini(conversaciones[de], mensaje);
 
     conversaciones[de].push({ role: 'user', parts: [{ text: mensaje }] });
     conversaciones[de].push({ role: 'model', parts: [{ text: textoRespuesta }] });
@@ -79,7 +94,7 @@ app.post('/webhook', async (req, res) => {
 
     res.sendStatus(200);
   } catch (error) {
-    console.error('Error procesando mensaje:', error.message || error);
+    console.error('Error:', error.message || error);
     try {
       await twilioClient.messages.create({
         from: process.env.TWILIO_WHATSAPP_NUMBER,
@@ -87,7 +102,7 @@ app.post('/webhook', async (req, res) => {
         body: 'Lo siento, tuve un problema. Por favor intenta de nuevo 🙏',
       });
     } catch (err) {
-      console.error('Error enviando mensaje de error:', err.message || err);
+      console.error('Error enviando mensaje de error:', err.message);
     }
     res.sendStatus(500);
   }
