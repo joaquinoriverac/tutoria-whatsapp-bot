@@ -40,58 +40,55 @@ REGLAS:
 - Nunca inventes información.
 - Para registrarse o ver planes: tutoriaperu.com.`;
 
-async function callGemini(historial, nuevoMensaje) {
-  const contents = [
+async function callGroq(historial, nuevoMensaje) {
+  const messages = [
+    { role: 'system', content: SYSTEM_PROMPT },
     ...historial,
-    { role: 'user', parts: [{ text: nuevoMensaje }] }
+    { role: 'user', content: nuevoMensaje }
   ];
 
   const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+    'https://api.groq.com/openai/v1/chat/completions',
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.GROQ_API_KEY}`
+      },
       body: JSON.stringify({
-        contents,
-        systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-        generationConfig: { maxOutputTokens: 500 }
+        model: 'llama-3.3-70b-versatile',
+        messages,
+        max_tokens: 500
       })
     }
   );
 
   if (!response.ok) {
     const errText = await response.text();
-    throw new Error(`Gemini ${response.status}: ${errText}`);
+    throw new Error(`Groq ${response.status}: ${errText}`);
   }
 
   const data = await response.json();
-  return data.candidates[0].content.parts[0].text;
+  return data.choices[0].message.content;
 }
 
 app.post('/webhook', async (req, res) => {
   const mensaje = req.body.Body?.trim();
   const de = req.body.From;
-
   if (!mensaje || !de) return res.sendStatus(400);
-
   if (!conversaciones[de]) conversaciones[de] = [];
-
   try {
-    const textoRespuesta = await callGemini(conversaciones[de], mensaje);
-
-    conversaciones[de].push({ role: 'user', parts: [{ text: mensaje }] });
-    conversaciones[de].push({ role: 'model', parts: [{ text: textoRespuesta }] });
-
+    const textoRespuesta = await callGroq(conversaciones[de], mensaje);
+    conversaciones[de].push({ role: 'user', content: mensaje });
+    conversaciones[de].push({ role: 'assistant', content: textoRespuesta });
     if (conversaciones[de].length > MAX_MENSAJES) {
       conversaciones[de] = conversaciones[de].slice(-MAX_MENSAJES);
     }
-
     await twilioClient.messages.create({
       from: process.env.TWILIO_WHATSAPP_NUMBER,
       to: de,
       body: textoRespuesta,
     });
-
     res.sendStatus(200);
   } catch (error) {
     console.error('Error:', error.message || error);
@@ -112,13 +109,8 @@ app.get('/', (req, res) => {
   res.json({ status: 'TutorIA WhatsApp Bot activo ✅', timestamp: new Date().toISOString() });
 });
 
-process.on('unhandledRejection', (reason) => {
-  console.error('Unhandled Rejection:', reason);
-});
-
-process.on('uncaughtException', (error) => {
-  console.error('Uncaught Exception:', error.message);
-});
+process.on('unhandledRejection', (reason) => { console.error('Unhandled Rejection:', reason); });
+process.on('uncaughtException', (error) => { console.error('Uncaught Exception:', error.message); });
 
 const PUERTO = process.env.PORT || 3000;
 app.listen(PUERTO, () => {
