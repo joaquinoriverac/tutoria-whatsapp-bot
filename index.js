@@ -106,7 +106,7 @@ app.post('/webhook', async (req, res) => {
 });
 
 app.get('/', (req, res) => {
-  res.json({ status: 'TutorIA WhatsApp Bot activo ✅', timestamp: new Date().toISOString() });
+  res.sendFile(__dirname + '/index.html');
 });
 
 process.on('unhandledRejection', (reason) => { console.error('Unhandled Rejection:', reason); });
